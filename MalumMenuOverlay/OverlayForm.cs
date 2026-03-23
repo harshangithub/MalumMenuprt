@@ -57,9 +57,13 @@ public sealed class OverlayForm : Form
         BackColor        = Color.Black;       // becomes transparent via colorkey
         TransparencyKey  = Color.Black;
         StartPosition    = FormStartPosition.Manual;
-        Location         = new Point(0, 0);
-        Size             = new Size(1920, 1080);
-        Opacity          = 1.0;
+
+        // Cover the entire primary screen so the cheat menu can be dragged
+        // anywhere without being clipped at the game window's boundary.
+        var screen = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1080);
+        Location = screen.Location;
+        Size     = screen.Size;
+        Opacity  = 1.0;
 
         // Double-buffering
         SetStyle(ControlStyles.AllPaintingInWmPaint |
@@ -96,7 +100,8 @@ public sealed class OverlayForm : Form
         int style = GetWindowLong(Handle, GWL_EXSTYLE);
         style |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE;
         SetWindowLong(Handle, GWL_EXSTYLE, style);
-        SetLayeredWindowAttributes(Handle, 0, 255, LWA_ALPHA);
+        // LWA_COLORKEY makes black pixels transparent; LWA_ALPHA keeps the rest fully opaque.
+        SetLayeredWindowAttributes(Handle, 0, 255, LWA_COLORKEY | LWA_ALPHA);
     }
 
     private void RestoreClickCapture()
@@ -106,7 +111,7 @@ public sealed class OverlayForm : Form
         style &= ~WS_EX_TRANSPARENT;
         style &= ~WS_EX_NOACTIVATE;
         SetWindowLong(Handle, GWL_EXSTYLE, style);
-        SetLayeredWindowAttributes(Handle, 0, 255, LWA_ALPHA);
+        SetLayeredWindowAttributes(Handle, 0, 255, LWA_COLORKEY | LWA_ALPHA);
     }
 
     // ── Menu visibility toggle ────────────────────────────────────────────
@@ -124,15 +129,17 @@ public sealed class OverlayForm : Form
     // ── Position tracking ─────────────────────────────────────────────────
     private void PosTimer_Tick(object? sender, EventArgs e)
     {
-        var r = ProcessDetector.GetGameWindowRect();
-        if (r is { } rect)
+        // Always keep the overlay covering the full primary screen.
+        // This ensures the cheat menu can be freely dragged to any position
+        // without disappearing at the edge of a windowed game boundary.
+        // The game-window rectangle is still used by OnPaint to correctly
+        // position ESP elements relative to the game.
+        var screen = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1080);
+        if (Location != screen.Location || Size != screen.Size)
         {
-            if (Location != rect.Location || Size != rect.Size)
-            {
-                Location = rect.Location;
-                Size     = rect.Size;
-                ResizeBackBuffer();
-            }
+            Location = screen.Location;
+            Size     = screen.Size;
+            ResizeBackBuffer();
         }
     }
 
@@ -269,7 +276,9 @@ public sealed class OverlayForm : Form
         get
         {
             var cp = base.CreateParams;
-            cp.ExStyle |= WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_NOACTIVATE;
+            // Include WS_EX_TRANSPARENT at creation time so the window is
+            // click-through from the very first moment it is displayed.
+            cp.ExStyle |= WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
             return cp;
         }
     }
