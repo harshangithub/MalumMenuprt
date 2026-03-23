@@ -160,7 +160,10 @@ public static class CheatState
     public static void Set(string name, bool value)
     {
         if (_fields.TryGetValue(name, out var f))
+        {
             f.SetValue(null, value);
+            WriteLiveState();
+        }
     }
 
     public static void Toggle(string name) => Set(name, !Get(name));
@@ -169,6 +172,31 @@ public static class CheatState
     {
         foreach (var f in _fields.Values)
             f.SetValue(null, false);
+        WriteLiveState();
+    }
+
+    // ── Live-state IPC ────────────────────────────────────────────────────
+    // Written on every toggle change so the BepInEx plugin running inside
+    // Among Us can pick it up and apply the cheats without any injection.
+    internal static readonly string LiveStatePath =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                     "MalumMenu", "state.txt");
+
+    private static void WriteLiveState()
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(LiveStatePath);
+            if (dir == null) return;
+            Directory.CreateDirectory(dir);
+            // Write to a temp file then replace atomically to avoid partial reads.
+            var tmp = LiveStatePath + ".tmp";
+            using (var w = new StreamWriter(tmp))
+                foreach (var f in _fields.Values)
+                    w.WriteLine($"{f.Name} = {f.GetValue(null)}");
+            File.Move(tmp, LiveStatePath, overwrite: true);
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[MalumMenu] Failed to write live state: {ex.Message}"); }
     }
 
     // ── Profile persistence ────────────────────────────────────────────────

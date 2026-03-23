@@ -268,9 +268,48 @@ public struct CheatToggles
         }
     }
 
+    // ── Live-state IPC: shared path written by MalumMenuOverlay ──────────
+    private static readonly string LiveStatePath =
+        Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData),
+                     "MalumMenu", "state.txt");
+    private static DateTime _liveStateLastRead = DateTime.MinValue;
+
+    /// <summary>
+    /// Reads the live-state file written by MalumMenuOverlay and mirrors any
+    /// changed toggle values into <see cref="CheatToggles"/> so that cheats
+    /// activated from the overlay UI are applied inside the game.
+    /// </summary>
+    private static void ApplyLiveState()
+    {
+        if (!File.Exists(LiveStatePath)) return;
+        try
+        {
+            var mod = File.GetLastWriteTimeUtc(LiveStatePath);
+            if (mod <= _liveStateLastRead) return;
+            _liveStateLastRead = mod;
+
+            foreach (var line in File.ReadAllLines(LiveStatePath))
+            {
+                var trimmed = line.Trim();
+                if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#')) continue;
+                var parts = trimmed.Split('=', 2);
+                if (parts.Length < 2) continue;
+                var name = parts[0].Trim();
+                if (!ToggleFields.TryGetValue(name, out var field)) continue;
+                if (bool.TryParse(parts[1].Trim(), out var val))
+                    field.SetValue(null, val);
+            }
+        }
+        catch (Exception ex) { MalumMenu.Log?.LogWarning($"[MalumMenu] Failed to read live state: {ex.Message}"); }
+    }
+
     public class KeybindListener : MonoBehaviour
     {
         public MalumMenu Plugin { get; internal set; }
+
+        // Poll the live-state file every PollEveryNFrames frames (100 ms at 60 fps).
+        private int _pollTick;
+        private const int PollEveryNFrames = 6;
 
         public void Update()
         {
@@ -297,6 +336,13 @@ public struct CheatToggles
 
                 var current = (bool)field.GetValue(null);
                 field.SetValue(null, !current);
+            }
+
+            // Apply toggle states written by the MalumMenuOverlay process.
+            if (++_pollTick >= PollEveryNFrames)
+            {
+                _pollTick = 0;
+                ApplyLiveState();
             }
         }
     }
